@@ -316,6 +316,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg-dark);color:var(--text-p
     <span id="liveIndicator" style="display:none;"><span style="color:var(--success)">●</span> Connected to TomTom live traffic</span>
     <span id="simIndicator"><span style="color:var(--warning)">●</span> Running spotter simulation</span>
 </p>
+<button onclick="testTomTomAPI()" style="margin-top:8px;padding:4px 10px;background:var(--bg-dark);border:1px solid var(--border);border-radius:8px;color:var(--text-secondary);font-size:10px;cursor:pointer;font-family:Inter,sans-serif">
+    <i class="fas fa-satellite-dish"></i> Test TomTom API
+</button>
 </div>
 </div>
 <div class="smart-route-card fade-in" id="smartRouteCard">
@@ -2646,37 +2649,110 @@ function updateDebugPanel() {
 }
 
 // ==================== TOMTOM API ====================
+let tomtomLastResponse = null;
+let tomtomApiStatus = 'unknown';
+
 function fetchTomTomTraffic() {
   if (!tomtomApiKey || tomtomApiKey === 'YOUR_TOMTOM_API_KEY') {
     useRealTraffic = false;
+    tomtomApiStatus = 'no_key';
     document.getElementById('liveIndicator').style.display = 'none';
     document.getElementById('simIndicator').style.display = 'inline';
+    updateTomTomDisplay();
     return;
   }
 
-  var url = 'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=' + tomtomApiKey + '&point=-1.2865,36.8172&unit=KMPH';
+  // Try multiple TomTom endpoints for verification
+  var urls = [
+    'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=' + tomtomApiKey + '&point=-1.2865,36.8172&unit=KMPH',
+    'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=' + tomtomApiKey + '&point=-1.2921,36.8210&unit=KMPH'
+  ];
+
+  var url = urls[0];
+
+  console.log('Testing TomTom API...');
 
   fetch(url)
     .then(function(response) {
-      if (!response.ok) throw new Error('API Error');
+      console.log('TomTom response status:', response.status);
+      if (!response.ok) {
+        if (response.status === 403) throw new Error('Invalid API Key');
+        if (response.status === 429) throw new Error('Rate Limited');
+        throw new Error('HTTP ' + response.status);
+      }
       return response.json();
     })
     .then(function(data) {
+      tomtomLastResponse = data;
+      tomtomApiStatus = 'connected';
       useRealTraffic = true;
+
       document.getElementById('liveIndicator').style.display = 'inline';
       document.getElementById('simIndicator').style.display = 'none';
-      document.getElementById('apiStatus').textContent = '● TomTom';
+      document.getElementById('apiStatus').textContent = '● TomTom LIVE';
       document.getElementById('apiStatus').style.color = '#00D4AA';
-      showToast('Connected to TomTom live traffic', 'success');
+
+      // Extract real data if available
+      var flow = data.flowSegmentData || {};
+      var realSpeed = flow.currentSpeed || 'N/A';
+      var freeFlow = flow.freeFlowSpeed || 'N/A';
+      var confidence = flow.confidence || 'N/A';
+
+      console.log('TomTom REAL DATA:', {
+        currentSpeed: realSpeed,
+        freeFlowSpeed: freeFlow,
+        confidence: confidence,
+        roadClosure: flow.roadClosure || false
+      });
+
+      showToast('TomTom LIVE: ' + realSpeed + ' km/h current speed', 'success');
+      updateTomTomDisplay();
     })
     .catch(function(e) {
+      tomtomApiStatus = 'error';
       useRealTraffic = false;
+      console.error('TomTom API Error:', e.message);
+
       document.getElementById('liveIndicator').style.display = 'none';
       document.getElementById('simIndicator').style.display = 'inline';
       document.getElementById('apiStatus').textContent = '● Simulation';
       document.getElementById('apiStatus').style.color = '#FFB800';
-      console.log('TomTom API not available, using simulation');
+
+      updateTomTomDisplay();
     });
+}
+
+function updateTomTomDisplay() {
+  var statusEl = document.getElementById('dataSourceText');
+  if (!statusEl) return;
+
+  if (tomtomApiStatus === 'connected' && tomtomLastResponse) {
+    var flow = tomtomLastResponse.flowSegmentData || {};
+    var speed = flow.currentSpeed || '?';
+    var freeFlow = flow.freeFlowSpeed || '?';
+    var conf = flow.confidence || '?';
+
+    statusEl.innerHTML = '<span style="color:var(--success)">●</span> TomTom LIVE: ' + speed + ' km/h (free: ' + freeFlow + ' km/h, conf: ' + conf + ')';
+  } else if (tomtomApiStatus === 'error') {
+    statusEl.innerHTML = '<span style="color:var(--warning)">●</span> TomTom Error — Using spotter simulation';
+  } else if (tomtomApiStatus === 'no_key') {
+    statusEl.innerHTML = '<span style="color:var(--warning)">●</span> No API Key — Using spotter simulation';
+  } else {
+    statusEl.innerHTML = '<span style="color:var(--warning)">●</span> Testing TomTom connection...';
+  }
+}
+
+function testTomTomAPI() {
+  showToast('Testing TomTom API...', 'info');
+  fetchTomTomTraffic();
+
+  setTimeout(function() {
+    if (tomtomApiStatus === 'connected') {
+      showToast('TomTom is WORKING with real data!', 'success');
+    } else {
+      showToast('TomTom not responding — simulation active', 'warning');
+    }
+  }, 3000);
 }
 
 // ==================== EVENT LISTENERS ====================
