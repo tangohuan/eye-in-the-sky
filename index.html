@@ -251,6 +251,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg-dark);color:var(--text-p
 <button class="active" data-dir="to_cbd">To CBD</button>
 <button data-dir="from_cbd">From CBD</button>
 </div>
+<button class="header-btn" id="refreshTrafficBtn" title="Refresh Live Traffic" style="background:linear-gradient(135deg,rgba(0,212,170,0.2),rgba(0,212,170,0.1));border-color:rgba(0,212,170,0.3);color:var(--accent)"><i class="fas fa-satellite-dish"></i></button>
 <div class="user-score" id="userScoreBtn"><i class="fas fa-fire"></i><span id="userScoreText">0 pts</span></div>
 <button class="header-btn" id="spotterBtn"><i class="fas fa-users"></i><span class="badge" id="spotterBadge">1</span></button>
 <button class="header-btn" id="notifBtn"><i class="fas fa-bell"></i><span class="badge" id="notifBadge" style="display:none">0</span></button>
@@ -294,6 +295,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg-dark);color:var(--text-p
 <button class="fab fab-secondary" id="navFab"><i class="fas fa-location-arrow"></i><span class="fab-label">Navigate</span></button>
 <button class="fab fab-primary" id="routesFab"><i class="fas fa-route"></i><span class="fab-label">Routes</span></button>
 </div>
+
+<button class="fab" id="refreshFab" style="position:absolute;bottom:170px;right:14px;z-index:500;width:44px;height:44px;border-radius:50%;background:linear-gradient(135deg,var(--accent),#00B894);border:none;color:white;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;box-shadow:0 4px 15px rgba(0,212,170,0.4);transition:all 0.3s">
+  <i class="fas fa-sync-alt"></i>
+  <span class="fab-label">Refresh Traffic</span>
+</button>
 </div>
 
 <div class="bottom-sheet" id="bottomSheet">
@@ -2839,6 +2845,19 @@ function setupEventListeners() {
   document.getElementById('notifBtn').addEventListener('click', function() {
     showToast('No new notifications', 'info');
   });
+
+  document.getElementById('refreshTrafficBtn').addEventListener('click', function() {
+    refreshTomTomData();
+  });
+
+  var refreshFab = document.getElementById('refreshFab');
+  if (refreshFab) {
+    refreshFab.addEventListener('click', function() {
+      this.style.transform = 'rotate(360deg)';
+      setTimeout(function() { refreshFab.style.transform = 'rotate(0deg)'; }, 500);
+      refreshTomTomData();
+    });
+  }
 }
 
 // ==================== INITIALIZATION ====================
