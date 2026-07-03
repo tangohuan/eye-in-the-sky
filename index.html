@@ -317,7 +317,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg-dark);color:var(--text-p
     <span id="simIndicator"><span style="color:var(--warning)">●</span> Running spotter simulation</span>
 </p>
 <button onclick="testTomTomAPI()" style="margin-top:8px;padding:4px 10px;background:var(--bg-dark);border:1px solid var(--border);border-radius:8px;color:var(--text-secondary);font-size:10px;cursor:pointer;font-family:Inter,sans-serif">
-    <i class="fas fa-satellite-dish"></i> Test TomTom API
+    <i class="fas fa-satellite-dish"></i> Refresh Live Traffic
 </button>
 </div>
 </div>
@@ -2651,8 +2651,14 @@ function updateDebugPanel() {
 // ==================== TOMTOM API ====================
 let tomtomLastResponse = null;
 let tomtomApiStatus = 'unknown';
+let tomtomQueryLocation = { lat: -1.2865, lng: 36.8172, name: 'Nairobi CBD (Haile Selassie Ave)' };
+let tomtomLastUpdate = null;
 
-function fetchTomTomTraffic() {
+function fetchTomTomTraffic(lat, lng, locationName) {
+  lat = lat || tomtomQueryLocation.lat;
+  lng = lng || tomtomQueryLocation.lng;
+  locationName = locationName || tomtomQueryLocation.name;
+
   if (!tomtomApiKey || tomtomApiKey === 'YOUR_TOMTOM_API_KEY') {
     useRealTraffic = false;
     tomtomApiStatus = 'no_key';
@@ -2662,22 +2668,16 @@ function fetchTomTomTraffic() {
     return;
   }
 
-  // Try multiple TomTom endpoints for verification
-  var urls = [
-    'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=' + tomtomApiKey + '&point=-1.2865,36.8172&unit=KMPH',
-    'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=' + tomtomApiKey + '&point=-1.2921,36.8210&unit=KMPH'
-  ];
+  var url = 'https://api.tomtom.com/traffic/services/4/flowSegmentData/absolute/10/json?key=' + tomtomApiKey + '&point=' + lat + ',' + lng + '&unit=KMPH';
 
-  var url = urls[0];
-
-  console.log('Testing TomTom API...');
+  console.log('Fetching TomTom data for:', locationName, '(' + lat + ', ' + lng + ')');
 
   fetch(url)
     .then(function(response) {
       console.log('TomTom response status:', response.status);
       if (!response.ok) {
         if (response.status === 403) throw new Error('Invalid API Key');
-        if (response.status === 429) throw new Error('Rate Limited');
+        if (response.status === 429) throw new Error('Rate Limited — Quota exceeded');
         throw new Error('HTTP ' + response.status);
       }
       return response.json();
@@ -2685,27 +2685,28 @@ function fetchTomTomTraffic() {
     .then(function(data) {
       tomtomLastResponse = data;
       tomtomApiStatus = 'connected';
+      tomtomLastUpdate = new Date();
       useRealTraffic = true;
 
       document.getElementById('liveIndicator').style.display = 'inline';
       document.getElementById('simIndicator').style.display = 'none';
-      document.getElementById('apiStatus').textContent = '● TomTom LIVE';
+      document.getElementById('apiStatus').textContent = '● TomTom';
       document.getElementById('apiStatus').style.color = '#00D4AA';
 
-      // Extract real data if available
       var flow = data.flowSegmentData || {};
       var realSpeed = flow.currentSpeed || 'N/A';
       var freeFlow = flow.freeFlowSpeed || 'N/A';
       var confidence = flow.confidence || 'N/A';
+      var roadClosure = flow.roadClosure || false;
 
-      console.log('TomTom REAL DATA:', {
-        currentSpeed: realSpeed,
-        freeFlowSpeed: freeFlow,
-        confidence: confidence,
-        roadClosure: flow.roadClosure || false
-      });
+      console.log('=== TOMTOM LIVE DATA ===');
+      console.log('Location:', locationName);
+      console.log('Current Speed:', realSpeed, 'km/h');
+      console.log('Free Flow Speed:', freeFlow, 'km/h');
+      console.log('Confidence:', confidence);
+      console.log('Road Closed:', roadClosure);
+      console.log('========================');
 
-      showToast('TomTom LIVE: ' + realSpeed + ' km/h current speed', 'success');
       updateTomTomDisplay();
     })
     .catch(function(e) {
@@ -2730,9 +2731,19 @@ function updateTomTomDisplay() {
     var flow = tomtomLastResponse.flowSegmentData || {};
     var speed = flow.currentSpeed || '?';
     var freeFlow = flow.freeFlowSpeed || '?';
-    var conf = flow.confidence || '?';
+    var conf = Math.round((flow.confidence || 0) * 100);
+    var congestion = freeFlow > 0 ? Math.round((1 - speed/freeFlow) * 100) : 0;
+    var timeStr = tomtomLastUpdate ? tomtomLastUpdate.toLocaleTimeString('en-KE', {hour:'2-digit', minute:'2-digit'}) : '?';
 
-    statusEl.innerHTML = '<span style="color:var(--success)">●</span> TomTom LIVE: ' + speed + ' km/h (free: ' + freeFlow + ' km/h, conf: ' + conf + ')';
+    statusEl.innerHTML = 
+      '<div style="margin-bottom:4px"><span style="color:var(--success)">●</span> <b>TomTom LIVE</b> — ' + tomtomQueryLocation.name + '</div>' +
+      '<div style="display:flex;gap:12px;flex-wrap:wrap;font-size:10px">' +
+        '<span>🚗 ' + speed + ' km/h now</span>' +
+        '<span>🟢 ' + freeFlow + ' km/h normal</span>' +
+        '<span>📉 ' + congestion + '% slower</span>' +
+        '<span>🎯 ' + conf + '% sure</span>' +
+        '<span>🕐 ' + timeStr + '</span>' +
+      '</div>';
   } else if (tomtomApiStatus === 'error') {
     statusEl.innerHTML = '<span style="color:var(--warning)">●</span> TomTom Error — Using spotter simulation';
   } else if (tomtomApiStatus === 'no_key') {
@@ -2742,17 +2753,33 @@ function updateTomTomDisplay() {
   }
 }
 
-function testTomTomAPI() {
-  showToast('Testing TomTom API...', 'info');
-  fetchTomTomTraffic();
+function refreshTomTomData() {
+  // Try to get user's location first, fallback to CBD
+  if (navigator.geolocation) {
+    showToast('Getting your location for real traffic data...', 'info');
+    navigator.geolocation.getCurrentPosition(
+      function(pos) {
+        tomtomQueryLocation = {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          name: 'Your Location (' + pos.coords.latitude.toFixed(4) + ', ' + pos.coords.longitude.toFixed(4) + ')'
+        };
+        fetchTomTomTraffic(pos.coords.latitude, pos.coords.longitude, tomtomQueryLocation.name);
+        showToast('Showing traffic near YOU!', 'success');
+      },
+      function(err) {
+        showToast('Location denied — showing Nairobi CBD traffic', 'warning');
+        fetchTomTomTraffic();
+      }
+    );
+  } else {
+    fetchTomTomTraffic();
+  }
+}
 
-  setTimeout(function() {
-    if (tomtomApiStatus === 'connected') {
-      showToast('TomTom is WORKING with real data!', 'success');
-    } else {
-      showToast('TomTom not responding — simulation active', 'warning');
-    }
-  }, 3000);
+function testTomTomAPI() {
+  showToast('Fetching live traffic data...', 'info');
+  refreshTomTomData();
 }
 
 // ==================== EVENT LISTENERS ====================
